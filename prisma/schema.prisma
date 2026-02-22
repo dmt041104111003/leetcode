@@ -1,0 +1,158 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Session {
+  id           Int              @id @default(autoincrement())
+  code         String           @unique @map("code")
+  name         String           @map("name")
+  startAt      DateTime         @map("start_at")
+  endAt        DateTime         @map("end_at")
+  examId       Int?             @map("exam_id")
+  createdAt    DateTime         @default(now()) @map("created_at")
+  examinees    SessionExaminee[]
+  submissions  Submission[]
+  sessionClasses SessionClass[]
+  exam         Exam?            @relation(fields: [examId], references: [id], onDelete: Restrict)
+
+  @@map("sessions")
+}
+
+model SessionClass {
+  id         Int      @id @default(autoincrement())
+  sessionId  Int      @map("session_id")
+  classId    Int      @map("class_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+  session    Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  class      Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, classId])
+  @@map("session_classes")
+}
+
+model Class {
+  id             Int              @id @default(autoincrement())
+  code           String           @unique @map("code")
+  name           String           @map("name")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  examinees      ClassExaminee[]
+  sessionClasses SessionClass[]
+
+  @@map("classes")
+}
+
+model ClassExaminee {
+  id         Int      @id @default(autoincrement())
+  classId    Int      @map("class_id")
+  examineeId Int      @unique @map("examinee_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+  class      Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  examinee   Examinee @relation(fields: [examineeId], references: [id], onDelete: Restrict)
+
+  @@unique([classId, examineeId])
+  @@map("class_examinees")
+}
+
+model Examinee {
+  id          Int           @id @default(autoincrement())
+  mssv        String        @unique @map("mssv")
+  fullName    String?       @map("full_name")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  sessions    SessionExaminee[]
+  submissions Submission[]
+  classes     ClassExaminee[]
+
+  @@map("examinees")
+}
+
+model SessionExaminee {
+  id          Int      @id @default(autoincrement())
+  sessionId   Int      @map("session_id")
+  examineeId  Int      @map("examinee_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  session     Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  examinee    Examinee @relation(fields: [examineeId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, examineeId])
+  @@map("session_examinees")
+}
+
+model Problem {
+  id            Int           @id @default(autoincrement())
+  slug          String        @unique @map("slug")
+  title         String        @map("title")
+  description   String        @map("description") @db.Text
+  difficulty    String        @map("difficulty")
+  constraints   String?       @map("constraints") @db.Text
+  examples      Json?         @map("examples")
+  starterCode   Json?         @map("starter_code")
+  timeLimitMs   Int?          @map("time_limit_ms")
+  memoryLimitMb Int?          @map("memory_limit_mb")
+  sortOrder     Int           @default(0) @map("sort_order")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  testCases     TestCase[]
+  examQuestions ExamQuestion[]
+  submissions   Submission[]
+
+  @@map("problems")
+}
+
+model Exam {
+  id          Int           @id @default(autoincrement())
+  code        String        @unique @map("code")
+  name        String        @map("name")
+  description String?       @map("description") @db.Text
+  createdAt   DateTime      @default(now()) @map("created_at")
+  questions   ExamQuestion[]
+  sessions    Session[]
+
+  @@map("exams")
+}
+
+model ExamQuestion {
+  id        Int     @id @default(autoincrement())
+  examId    Int     @map("exam_id")
+  problemId Int     @map("problem_id")
+  sortOrder Int     @default(0) @map("sort_order")
+  points    Int?    @map("points")
+  exam      Exam    @relation(fields: [examId], references: [id], onDelete: Cascade)
+  problem   Problem @relation(fields: [problemId], references: [id], onDelete: Restrict)
+
+  @@unique([examId, problemId])
+  @@map("exam_questions")
+}
+
+model TestCase {
+  id             Int     @id @default(autoincrement())
+  problemId      Int     @map("problem_id")
+  input          String  @map("input") @db.Text
+  expectedOutput String  @map("expected_output") @db.Text
+  isSample       Boolean @default(false) @map("is_sample") 
+  sortOrder      Int     @default(0) @map("sort_order")
+  problem        Problem @relation(fields: [problemId], references: [id], onDelete: Cascade)
+
+  @@map("test_cases")
+}
+
+model Submission {
+  id           Int      @id @default(autoincrement())
+  sessionId    Int      @map("session_id")
+  examineeId   Int      @map("examinee_id")
+  problemId    Int      @map("problem_id")
+  code         String   @map("code") @db.Text
+  language     String   @map("language")
+  status       String   @default("submitted") @map("status")
+  score        Int?     @map("score")
+  resultDetail Json?    @map("result_detail")
+  submittedAt  DateTime @default(now()) @map("submitted_at")
+  session      Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  examinee     Examinee @relation(fields: [examineeId], references: [id], onDelete: Cascade)
+  problem      Problem  @relation(fields: [problemId], references: [id], onDelete: Restrict)
+
+  @@map("submissions")
+}

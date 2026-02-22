@@ -1,0 +1,108 @@
+.dialogBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.dialogPanel {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  width: 100%;
+  max-width: 720px;
+  max-height: 90vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.18);
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.dialogPanel::-webkit-scrollbar {
+  display: none;
+}
+
+@keyframes dialogSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.dialogHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.dialogTitle {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: #1a1a1a;
+  margin: 0;
+}
+
+.dialogClose {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1.5rem;
+  color: #9ca3af;
+  line-height: 1;
+  padding: 0;
+}
+
+.dialogBody {
+  padding: 1.5rem;
+}
+
+.dialogBodyScrollHidden {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.dialogBodyScrollHidden::-webkit-scrollbar {
+  display: none;
+}
+
+.imagePreview {
+  max-width: 120px;
+  max-height: 120px;
+  object-fit: contain;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+}
+
+@media (max-width: 768px) {
+  .dialogBackdrop {
+    padding: 0;
+    align-items: flex-end;
+  }
+
+  .dialogPanel {
+    max-width: 100%;
+    max-height: 85vh;
+    border-radius: 16px 16px 0 0;
+    animation: dialogSlideUp 0.25s ease;
+  }
+
+  .dialogHeader {
+    padding: 1rem 1.25rem;
+  }
+
+  .dialogBody {
+    padding: 1rem 1.25rem;
+    padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0));
+  }
+}
