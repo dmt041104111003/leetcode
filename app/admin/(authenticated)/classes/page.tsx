@@ -8,6 +8,7 @@ import dialogStyles from '../../styles/Dialog.module.css';
 import paginationStyles from '../../styles/Pagination.module.css';
 import Pagination from '../../components/Pagination';
 import type { Class, ClassExaminee, Examinee } from '../../types';
+import { randomClassCode } from '../utils/codeUtils';
 
 const styles = { ...formStyles, ...tableStyles, ...buttonStyles, ...dialogStyles, ...paginationStyles };
 const PAGE_SIZE = 10;
@@ -62,6 +63,7 @@ export default function ClassesPage() {
 
   const openAdd = () => {
     resetForm();
+    setCode(randomClassCode());
     setOpen(true);
   };
 
@@ -298,7 +300,7 @@ export default function ClassesPage() {
                 {error && <p className={styles.error}>{error}</p>}
                 <div className={styles.formGroup}>
                   <label className={styles.label}>Mã lớp</label>
-                  <input className={styles.input} value={code} onChange={(e) => setCode(e.target.value)} placeholder="Mã lớp" required />
+                  <input className={styles.input} value={code} readOnly disabled style={{ opacity: 0.9, cursor: 'not-allowed' }} />
                 </div>
                 <div className={styles.formGroup}>
                   <label className={styles.label}>Tên lớp</label>

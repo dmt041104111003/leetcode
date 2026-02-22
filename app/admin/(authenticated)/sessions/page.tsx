@@ -8,10 +8,15 @@ import dialogStyles from '../../styles/Dialog.module.css';
 import paginationStyles from '../../styles/Pagination.module.css';
 import Pagination from '../../components/Pagination';
 import type { Session, Exam, Class } from '../../types';
-import { formatDateTime } from '../utils/dateUtils';
+import { formatDateTime, toDatetimeLocal } from '../utils/dateUtils';
+import { randomSessionCode } from '../utils/codeUtils';
 
 const styles = { ...formStyles, ...tableStyles, ...buttonStyles, ...dialogStyles, ...paginationStyles };
 const PAGE_SIZE = 10;
+
+function sessionAlreadyStarted(s: { startAt: string }) {
+  return new Date() >= new Date(s.startAt);
+}
 
 export default function SessionsPage() {
   const [list, setList] = useState<Session[]>([]);
@@ -87,6 +92,7 @@ export default function SessionsPage() {
 
   const openAdd = () => {
     resetForm();
+    setCode(randomSessionCode());
     setOpen(true);
   };
 
@@ -105,6 +111,10 @@ export default function SessionsPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    if (new Date(endAt) <= new Date(startAt)) {
+      setError('Thời gian kết thúc phải sau thời gian bắt đầu.');
+      return;
+    }
     setLoading(true);
     try {
       const body = { code: code.trim(), name: name.trim(), startAt, endAt, examId: examId || null, classIds };
@@ -272,7 +282,7 @@ export default function SessionsPage() {
                 <td>
                   <div className={styles.actions}>
                     <button type="button" className={styles.btnSecondary} onClick={() => openDetail(s)}>Chi tiết</button>
-                    <button type="button" className={styles.btnSecondary} onClick={() => openEdit(s)}>Sửa</button>
+                    <button type="button" className={styles.btnSecondary} onClick={() => !sessionAlreadyStarted(s) && openEdit(s)} disabled={sessionAlreadyStarted(s)} title={sessionAlreadyStarted(s) ? 'Ca thi đã bắt đầu hoặc đã kết thúc, không thể sửa.' : undefined}>Sửa</button>
                     <button type="button" className={styles.btnDanger} onClick={() => handleDelete(s.id)}>Xóa</button>
                   </div>
                 </td>
@@ -312,7 +322,7 @@ export default function SessionsPage() {
             <div className={styles.tableCardActions}>
               <div className={styles.actions}>
                 <button type="button" className={styles.btnSecondary} onClick={() => openDetail(s)}>Chi tiết</button>
-                <button type="button" className={styles.btnSecondary} onClick={() => openEdit(s)}>Sửa</button>
+                <button type="button" className={styles.btnSecondary} onClick={() => !sessionAlreadyStarted(s) && openEdit(s)} disabled={sessionAlreadyStarted(s)} title={sessionAlreadyStarted(s) ? 'Ca thi đã bắt đầu hoặc đã kết thúc, không thể sửa.' : undefined}>Sửa</button>
                 <button type="button" className={styles.btnDanger} onClick={() => handleDelete(s.id)}>Xóa</button>
               </div>
             </div>
@@ -340,7 +350,7 @@ export default function SessionsPage() {
                 {error && <p className={styles.error}>{error}</p>}
                 <div className={styles.formGroup}>
                   <label className={styles.label}>Mã ca thi</label>
-                  <input className={styles.input} value={code} onChange={(e) => setCode(e.target.value)} placeholder="Mã ca thi" required />
+                  <input className={styles.input} value={code} readOnly disabled style={{ opacity: 0.9, cursor: 'not-allowed' }} />
                 </div>
                 <div className={styles.formGroup}>
                   <label className={styles.label}>Tên ca thi</label>
@@ -348,11 +358,29 @@ export default function SessionsPage() {
                 </div>
                 <div className={styles.formGroup}>
                   <label className={styles.label}>Thời gian bắt đầu</label>
-                  <input type="datetime-local" className={styles.input} value={startAt} onChange={(e) => setStartAt(e.target.value)} required />
+                  <input
+                    type="datetime-local"
+                    className={styles.input}
+                    value={startAt}
+                    min={editingId ? undefined : toDatetimeLocal(new Date())}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setStartAt(v);
+                      if (endAt && v && new Date(endAt) <= new Date(v)) setEndAt('');
+                    }}
+                    required
+                  />
                 </div>
                 <div className={styles.formGroup}>
                   <label className={styles.label}>Thời gian kết thúc</label>
-                  <input type="datetime-local" className={styles.input} value={endAt} onChange={(e) => setEndAt(e.target.value)} required />
+                  <input
+                    type="datetime-local"
+                    className={styles.input}
+                    value={endAt}
+                    min={startAt || (editingId ? undefined : toDatetimeLocal(new Date()))}
+                    onChange={(e) => setEndAt(e.target.value)}
+                    required
+                  />
                 </div>
                 <div className={styles.formGroup}>
                   <label className={styles.label}>Đề thi</label>

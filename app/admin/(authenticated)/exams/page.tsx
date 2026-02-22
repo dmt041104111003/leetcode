@@ -8,6 +8,7 @@ import dialogStyles from '../../styles/Dialog.module.css';
 import paginationStyles from '../../styles/Pagination.module.css';
 import Pagination from '../../components/Pagination';
 import type { Exam, ExamQuestion, Problem } from '../../types';
+import { randomExamCode } from '../utils/codeUtils';
 
 type ExamWithQuestions = Exam & { questions: (ExamQuestion & { problem: Problem })[] };
 
@@ -66,6 +67,7 @@ export default function ExamsPage() {
 
   const openAdd = () => {
     resetForm();
+    setCode(randomExamCode());
     setOpen(true);
   };
 
@@ -261,7 +263,7 @@ export default function ExamsPage() {
                 {error && <p className={styles.error}>{error}</p>}
                 <div className={styles.formGroup}>
                   <label className={styles.label}>Mã đề thi</label>
-                  <input className={styles.input} value={code} onChange={(e) => setCode(e.target.value)} placeholder="Mã đề thi" required />
+                  <input className={styles.input} value={code} readOnly disabled style={{ opacity: 0.9, cursor: 'not-allowed' }} />
                 </div>
                 <div className={styles.formGroup}>
                   <label className={styles.label}>Tên đề thi</label>

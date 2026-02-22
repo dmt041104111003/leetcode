@@ -51,8 +51,9 @@ export async function POST(req: NextRequest) {
     const classIds = parseClassIds(bodyClassIds);
 
     if (classIds.length > 0) {
+      const now = new Date();
       const others = await prisma.session.findMany({
-        where: { sessionClasses: { some: {} } },
+        where: { sessionClasses: { some: {} }, endAt: { gte: now } },
         select: {
           id: true,
           startAt: true,

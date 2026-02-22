@@ -7,10 +7,12 @@ import type { ExamQuestionItem, ExamClientProps } from '../interfaces/exam';
 import { formatRemaining } from '../lib/time';
 import { getStarterCodeMap } from '../lib/starterCode';
 import { useCountdown } from '../hooks/useCountdown';
+import { useProctoring } from '../hooks/useProctoring';
 import DifficultyBadge from './DifficultyBadge';
 import ConstraintsBlock from './ConstraintsBlock';
 import ExamplesBlock from './ExamplesBlock';
 import CodeEditor from './CodeEditor';
+import { ProctoringCamera, ViolationPopup } from './ProctoringCamera';
 
 export type { ExamQuestionItem } from '../interfaces/exam';
 
@@ -38,6 +40,9 @@ export default function ExamClient({
   const [submittedProblemIds, setSubmittedProblemIds] = useState<Set<number>>(new Set());
   const [scoreByProblemId, setScoreByProblemId] = useState<Record<number, number | null>>({});
   const timeUp = remainingMs <= 0;
+
+  const proctoringEnabled = !timeUp;
+  const { videoRef, stream: proctoringStream, violation, clearViolation, error: proctoringError, active: proctoringActive, gazeResult } = useProctoring(proctoringEnabled);
 
   useEffect(() => {
     let cancelled = false;
@@ -299,6 +304,8 @@ export default function ExamClient({
 
   return (
     <main className="min-h-screen bg-gray-50 flex flex-col">
+      {violation && <ViolationPopup violation={violation} onClose={clearViolation} />}
+      <ProctoringCamera videoRef={videoRef} stream={proctoringStream} active={proctoringActive} error={proctoringError} gazeResult={gazeResult} enabled={proctoringEnabled} />
       <header className="sticky top-0 z-10 flex items-center justify-between gap-4 px-4 py-3 bg-white border-b border-gray-200 shadow-sm">
         <div className="flex items-center gap-3 min-w-0">
           <h1 className="text-lg font-semibold text-gray-900 truncate">{sessionName}</h1>

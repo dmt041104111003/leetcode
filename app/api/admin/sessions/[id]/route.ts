@@ -56,6 +56,14 @@ export async function PUT(
     });
     if (!current) return NextResponse.json({ error: 'Không tìm thấy ca thi' }, { status: 404 });
 
+    const now = new Date();
+    if (now >= current.startAt) {
+      return NextResponse.json(
+        { error: 'Ca thi đã bắt đầu hoặc đã kết thúc, không thể sửa.' },
+        { status: 400 }
+      );
+    }
+
     const data: Record<string, unknown> = {};
     if (body.code != null) data.code = String(body.code).trim();
     if (body.name != null) data.name = String(body.name).trim();
@@ -69,8 +77,9 @@ export async function PUT(
       body.classIds !== undefined ? parseClassIds(body.classIds) : current.sessionClasses.map((sc) => sc.classId);
 
     if (classIds.length > 0) {
+      const now = new Date();
       const others = await prisma.session.findMany({
-        where: { sessionClasses: { some: {} } },
+        where: { sessionClasses: { some: {} }, endAt: { gte: now } },
         select: {
           id: true,
           startAt: true,

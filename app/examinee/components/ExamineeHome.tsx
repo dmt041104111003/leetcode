@@ -101,6 +101,17 @@ export default function ExamineeHome({ examinee }: ExamineeHomeProps) {
         setError(data.error || 'Không thể vào ca thi');
         return;
       }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+          audio: false,
+        });
+        stream.getTracks().forEach((t) => t.stop());
+      } catch {
+        setError('Vui lòng bật quyền camera để giám sát khi làm bài.');
+        setLoading(false);
+        return;
+      }
       router.push('/examinee/exam');
       router.refresh();
     } catch {
