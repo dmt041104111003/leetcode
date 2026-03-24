@@ -1,0 +1,13 @@
+numpy>=1.19.0
+opencv-python>=4.5.0
+tqdm>=4.60.0
+requests>=2.25.0
+scipy>=1.7.0
+matplotlib>=3.4.0
+torch>=1.9.0
+torchvision>=0.10.0
+tensorflow>=2.6.0
+fastapi>=0.100.0
+uvicorn[standard]>=0.22.0
+python-multipart>=0.0.6
+PyYAML>=5.4.0
