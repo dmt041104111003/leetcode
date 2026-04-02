@@ -40,6 +40,10 @@ export async function POST(req: NextRequest) {
         { status: 403 }
       );
     }
+    await prisma.sessionExaminee.update({
+      where: { sessionId_examineeId: { sessionId: session.id, examineeId: auth.examineeId } },
+      data: { joinedAt: new Date() },
+    });
     await setExamineeCookie(auth.examineeId, session.id);
     return NextResponse.json({
       success: true,

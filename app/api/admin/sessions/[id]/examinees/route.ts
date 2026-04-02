@@ -31,29 +31,34 @@ export async function GET(
   });
   const examineeIds = classExaminees.map((ce) => ce.examineeId);
 
-  const [participatedList, submittedGroup] = await Promise.all([
+  const [sessionLinks, submittedGroup, violationGroup] = await Promise.all([
     prisma.sessionExaminee.findMany({
       where: { sessionId, examineeId: { in: examineeIds } },
-      select: { examineeId: true },
+      select: { examineeId: true, joinedAt: true },
     }),
     prisma.submission.groupBy({
       by: ['examineeId'],
       where: { sessionId, examineeId: { in: examineeIds } },
-      _count: true,
+      _count: { _all: true },
+    }),
+    prisma.proctoringViolation.groupBy({
+      by: ['examineeId'],
+      where: { sessionId, examineeId: { in: examineeIds } },
+      _count: { _all: true },
     }),
   ]);
-  const participated = new Set(participatedList.map((p) => p.examineeId));
-  const submittedByExaminee = new Map(
-    submittedGroup.map((s) => [s.examineeId, (s._count as { examineeId?: number }).examineeId ?? 0])
-  );
+  const linkByExaminee = new Map(sessionLinks.map((p) => [p.examineeId, p]));
+  const submittedByExaminee = new Map(submittedGroup.map((s) => [s.examineeId, s._count._all]));
+  const violationsByExaminee = new Map(violationGroup.map((v) => [v.examineeId, v._count._all]));
 
   const examinees = classExaminees.map((ce) => ({
     id: ce.examinee.id,
     mssv: ce.examinee.mssv,
     fullName: ce.examinee.fullName,
-    participated: participated.has(ce.examineeId),
+    participated: linkByExaminee.get(ce.examineeId)?.joinedAt != null,
     submitted: (submittedByExaminee.get(ce.examineeId) ?? 0) > 0,
     submissionCount: submittedByExaminee.get(ce.examineeId) ?? 0,
+    violationCount: violationsByExaminee.get(ce.examineeId) ?? 0,
   }));
 
   return NextResponse.json({ examinees });

@@ -18,6 +18,19 @@ function sessionAlreadyStarted(s: { startAt: string }) {
   return new Date() >= new Date(s.startAt);
 }
 
+function normalizeProctoringSnapshotUrl(v: { snapshotUrl?: unknown; snapshot_url?: unknown }): string {
+  const raw =
+    typeof v.snapshotUrl === 'string'
+      ? v.snapshotUrl
+      : typeof v.snapshot_url === 'string'
+        ? v.snapshot_url
+        : '';
+  const s = raw.trim();
+  if (!s) return '';
+  if (/^https?:\/\//i.test(s)) return s;
+  return s;
+}
+
 export default function SessionsPage() {
   const [list, setList] = useState<Session[]>([]);
   const [open, setOpen] = useState(false);
@@ -35,8 +48,26 @@ export default function SessionsPage() {
   const [page, setPage] = useState(1);
 
   type DetailClass = { id: number; code: string; name: string; countParticipated: number; countSubmitted: number };
-  type DetailExaminee = { id: number; mssv: string; fullName: string | null; participated: boolean; submitted: boolean; submissionCount: number };
+  type DetailExaminee = {
+    id: number;
+    mssv: string;
+    fullName: string | null;
+    participated: boolean;
+    submitted: boolean;
+    submissionCount: number;
+    violationCount: number;
+  };
   type DetailSubmission = { id: number; problemId: number; problemTitle: string; problemSlug: string; score: number | null; submittedAt: string; code: string; language: string };
+  type ProctoringViolationRow = {
+    id: number;
+    violationType: string;
+    message: string | null;
+    facesCount: number | null;
+    snapshotUrl?: string | null;
+    meta: unknown;
+    createdAt: string;
+    examId: number | null;
+  };
   const [detailOpen, setDetailOpen] = useState(false);
   const [viewCodeSubmission, setViewCodeSubmission] = useState<DetailSubmission | null>(null);
   const [detailSessionId, setDetailSessionId] = useState<number | null>(null);
@@ -48,6 +79,11 @@ export default function SessionsPage() {
   const [detailSelectedExaminee, setDetailSelectedExaminee] = useState<DetailExaminee | null>(null);
   const [detailSubmissions, setDetailSubmissions] = useState<DetailSubmission[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [violationsOpen, setViolationsOpen] = useState(false);
+  const [violationsLoading, setViolationsLoading] = useState(false);
+  const [violationsRows, setViolationsRows] = useState<ProctoringViolationRow[]>([]);
+  const [violationsTitle, setViolationsTitle] = useState<string>('');
+  const [violationsMeta, setViolationsMeta] = useState<{ sessionCode: string; examLabel: string; mssv: string; fullName: string | null } | null>(null);
 
   const fetchList = useCallback(async () => {
     const res = await fetch('/api/admin/sessions');
@@ -234,6 +270,47 @@ export default function SessionsPage() {
     setDetailSelectedExaminee(null);
     setDetailSubmissions([]);
     setViewCodeSubmission(null);
+    setViolationsOpen(false);
+    setViolationsRows([]);
+    setViolationsTitle('');
+    setViolationsMeta(null);
+  };
+
+  const openViolations = async (ex: DetailExaminee) => {
+    if (!detailSessionId || !detailSelectedClass || !detailSession) return;
+    setViolationsOpen(true);
+    setViolationsLoading(true);
+    setViolationsTitle(`Vi phạm giám sát — ${ex.mssv}`);
+    setViolationsMeta({
+      sessionCode: detailSession.code,
+      examLabel: detailSession.exam ? `${detailSession.exam.name} (${detailSession.exam.code})` : '—',
+      mssv: ex.mssv,
+      fullName: ex.fullName,
+    });
+    try {
+      const res = await fetch(
+        `/api/admin/sessions/${detailSessionId}/proctoring-violations?examineeId=${ex.id}&classId=${detailSelectedClass.id}`
+      );
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        const rows = Array.isArray(data.violations) ? data.violations : [];
+        setViolationsRows(
+          rows.map((row: unknown) => {
+            const r = row as ProctoringViolationRow;
+            const snap = normalizeProctoringSnapshotUrl(r) || null;
+            return { ...r, snapshotUrl: snap };
+          })
+        );
+      } else {
+        setViolationsRows([]);
+        const msg = typeof (data as { error?: string }).error === 'string' ? (data as { error: string }).error : 'Không tải được danh sách vi phạm';
+        alert(msg);
+      }
+    } catch {
+      setViolationsRows([]);
+    } finally {
+      setViolationsLoading(false);
+    }
   };
 
   const backToClasses = () => {
@@ -469,6 +546,8 @@ export default function SessionsPage() {
                           <th>MSSV</th>
                           <th>Họ tên</th>
                           <th>Tham gia thi</th>
+                          <th>Đã nộp bài</th>
+                          <th>Số vi phạm</th>
                           <th></th>
                         </tr>
                       </thead>
@@ -478,8 +557,13 @@ export default function SessionsPage() {
                             <td>{ex.mssv}</td>
                             <td>{ex.fullName ?? '—'}</td>
                             <td>{ex.participated ? 'Có' : '—'}</td>
+                            <td>{ex.submitted ? 'Có' : '—'}</td>
+                            <td>{ex.violationCount ?? 0}</td>
                             <td>
-                              <button type="button" className={styles.btnSecondary} onClick={() => openExamineeSubmissions(ex)}>Xem bài nộp</button>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                                <button type="button" className={styles.btnSecondary} onClick={() => openExamineeSubmissions(ex)}>Xem bài nộp</button>
+                                <button type="button" className={styles.btnSecondary} onClick={() => openViolations(ex)}>Chi tiết vi phạm</button>
+                              </div>
                             </td>
                           </tr>
                         ))}
@@ -546,6 +630,183 @@ export default function SessionsPage() {
                 </>
               )}
             </div>
+            {violationsOpen && (
+              <div className={styles.dialogBackdrop} style={{ zIndex: 1001 }} onClick={() => setViolationsOpen(false)}>
+                <div className={styles.dialogPanel} onClick={(e) => e.stopPropagation()} style={{ maxWidth: 920, width: '92vw', maxHeight: '88vh', display: 'flex', flexDirection: 'column' }}>
+                  <div className={styles.dialogHeader}>
+                    <h3 className={styles.dialogTitle} style={{ fontSize: '1rem' }}>{violationsTitle}</h3>
+                    <button type="button" className={styles.dialogClose} onClick={() => setViolationsOpen(false)} aria-label="Đóng">×</button>
+                  </div>
+                  <div className={styles.dialogBody} style={{ overflow: 'auto', flex: 1 }}>
+                    {violationsMeta && (
+                      <p style={{ fontSize: '0.875rem', color: '#6b7280', marginTop: 0, lineHeight: 1.5 }}>
+                        <strong>Ca thi:</strong> {violationsMeta.sessionCode}
+                        {' · '}
+                        <strong>Đề thi:</strong> {violationsMeta.examLabel}
+                        <br />
+                        <strong>Thí sinh:</strong> {violationsMeta.mssv} — {violationsMeta.fullName ?? '—'}
+                      </p>
+                    )}
+                    {violationsLoading && <p style={{ marginTop: 8 }}>Đang tải...</p>}
+                    {!violationsLoading && violationsRows.length === 0 && (
+                      <p style={{ marginTop: 8, fontSize: '0.875rem', color: '#6b7280' }}>Chưa ghi nhận vi phạm giám sát.</p>
+                    )}
+                    {!violationsLoading && violationsRows.length > 0 && (
+                      <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                        {violationsRows.map((v) => {
+                          const meta = v.meta && typeof v.meta === 'object' ? (v.meta as Record<string, unknown>) : null;
+                          const metaFacesRaw = meta && Array.isArray(meta.faces) ? meta.faces : [];
+                          const metaFaces = metaFacesRaw.filter((x): x is Record<string, unknown> => x != null && typeof x === 'object');
+                          const enrolledSid =
+                            meta && typeof meta.enrolled_student_id === 'string' ? meta.enrolled_student_id.trim() : '';
+                          const snapshotSrc = normalizeProctoringSnapshotUrl(v);
+                          return (
+                            <div
+                              key={v.id}
+                              style={{
+                                border: '1px solid #e5e7eb',
+                                borderRadius: 10,
+                                overflow: 'hidden',
+                                background: '#f9fafb',
+                              }}
+                            >
+                              <div
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'flex-start',
+                                  justifyContent: 'space-between',
+                                  gap: 12,
+                                  padding: '10px 12px',
+                                  background: '#1f2937',
+                                  color: '#fff',
+                                }}
+                              >
+                                <div style={{ minWidth: 0 }}>
+                                  <p style={{ margin: 0, fontSize: '0.75rem', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                                    {v.violationType || '—'}
+                                  </p>
+                                  {(typeof v.facesCount === 'number' || enrolledSid) ? (
+                                    <p style={{ margin: '6px 0 0', fontSize: '0.75rem', opacity: 0.9 }}>
+                                      {[
+                                        typeof v.facesCount === 'number' ? `Faces: ${v.facesCount}` : null,
+                                        enrolledSid ? `MSSV đăng ký: ${enrolledSid}` : null,
+                                      ]
+                                        .filter(Boolean)
+                                        .join(' · ')}
+                                    </p>
+                                  ) : null}
+                                </div>
+                                <p style={{ margin: 0, fontSize: '0.75rem', opacity: 0.95, whiteSpace: 'nowrap' }}>
+                                  {formatDateTime(v.createdAt)}
+                                </p>
+                              </div>
+                              <div style={{ padding: 12 }}>
+                                <div style={{ marginBottom: 12 }}>
+                                  <p
+                                    style={{
+                                      margin: '0 0 8px',
+                                      fontSize: '0.75rem',
+                                      fontWeight: 600,
+                                      color: '#374151',
+                                      letterSpacing: '0.04em',
+                                      textTransform: 'uppercase',
+                                    }}
+                                  >
+                                    Ảnh vi phạm (cloud)
+                                  </p>
+                                  {snapshotSrc ? (
+                                    <>
+                                      <a
+                                        href={snapshotSrc}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        style={{ display: 'inline-block', fontSize: '0.75rem', color: '#2563eb', marginBottom: 8 }}
+                                      >
+                                        Mở ảnh đầy đủ ↗
+                                      </a>
+                                      <div
+                                        style={{
+                                          position: 'relative',
+                                          width: '100%',
+                                          maxHeight: 360,
+                                          borderRadius: 8,
+                                          overflow: 'hidden',
+                                          border: '1px solid #e5e7eb',
+                                          background: '#0f172a',
+                                        }}
+                                      >
+                                        {/* img + no-referrer: một số cấu hình Cloudinary chặn hotlink theo Referer */}
+                                        <img
+                                          src={snapshotSrc}
+                                          alt={`Vi phạm ${v.violationType || ''}`}
+                                          referrerPolicy="no-referrer"
+                                          style={{
+                                            width: '100%',
+                                            height: 'auto',
+                                            maxHeight: 360,
+                                            objectFit: 'contain',
+                                            display: 'block',
+                                          }}
+                                        />
+                                      </div>
+                                    </>
+                                  ) : (
+                                    <p style={{ margin: 0, fontSize: '0.8125rem', color: '#9ca3af', lineHeight: 1.45 }}>
+                                      Chưa có URL ảnh (kiểm tra upload Cloudinary khi ghi vi phạm, biến môi trường CLOUDINARY_* trên
+                                      server).
+                                    </p>
+                                  )}
+                                </div>
+                                {v.message ? (
+                                  <p style={{ margin: 0, fontSize: '0.875rem', lineHeight: 1.45, whiteSpace: 'pre-line', wordBreak: 'break-word' }}>
+                                    {v.message}
+                                  </p>
+                                ) : (
+                                  <p style={{ margin: 0, fontSize: '0.875rem', color: '#6b7280' }}>—</p>
+                                )}
+                                {metaFaces.filter((f) => typeof f.id === 'string' && String(f.id).trim()).length > 0 && (
+                                  <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid #e5e7eb' }}>
+                                    <p style={{ margin: '0 0 6px', fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', textTransform: 'uppercase' }}>
+                                      Thí sinh đã định danh
+                                    </p>
+                                    {metaFaces
+                                      .filter((f) => typeof f.id === 'string' && String(f.id).trim())
+                                      .map((f, idx) => {
+                                      const mssv = String(f.id).trim();
+                                      const dir = typeof f.direction === 'string' ? f.direction : '—';
+                                      const away = f.looking_away === true;
+                                      const th = typeof f.theta === 'number' ? f.theta : null;
+                                      const ph = typeof f.phi === 'number' ? f.phi : null;
+                                      return (
+                                        <div key={`${mssv}-${idx}`} style={{ marginBottom: 8 }}>
+                                          <p style={{ margin: 0, fontSize: '0.875rem', fontWeight: 600 }}>
+                                            MSSV: {mssv}
+                                            {away ? ' — lệch' : ''}
+                                          </p>
+                                          <p style={{ margin: '2px 0 0', fontSize: '0.875rem', color: '#374151' }}>
+                                            {dir}
+                                            {(th != null || ph != null) && (
+                                              <span style={{ fontSize: '0.8125rem', color: '#6b7280' }}>
+                                                {' '}
+                                                (θ={th != null ? th.toFixed(3) : '—'} rad, φ={ph != null ? ph.toFixed(3) : '—'} rad)
+                                              </span>
+                                            )}
+                                          </p>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

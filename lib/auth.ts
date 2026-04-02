@@ -17,6 +17,8 @@ interface ExamineeTokenPayload {
   sub: string;
   role: 'examinee';
   sessionId?: number;
+  /** Epoch ms — mốc bắt đầu “lượt” tính lỗi giám sát (đuổi sau N lần). Mỗi đăng nhập / vào ca cập nhật. */
+  strikeSince?: number;
 }
 
 export async function signToken(payload: TokenPayload): Promise<string> {
@@ -76,11 +78,16 @@ export async function verifyExamineeToken(token: string): Promise<ExamineeTokenP
   }
 }
 
-export async function setExamineeCookie(examineeId: number, sessionId?: number) {
+export async function setExamineeCookie(
+  examineeId: number,
+  sessionId?: number,
+  strikeSinceMs: number = Date.now()
+) {
   const token = await signExamineeToken({
     sub: String(examineeId),
     role: 'examinee',
     ...(sessionId != null && { sessionId }),
+    strikeSince: strikeSinceMs,
   });
   const store = await cookies();
   store.set(COOKIE_EXAMINEE, token, {
@@ -92,7 +99,12 @@ export async function setExamineeCookie(examineeId: number, sessionId?: number) 
   });
 }
 
-export async function verifyExaminee(): Promise<{ examineeId: number; sessionId?: number } | null> {
+export async function verifyExaminee(): Promise<{
+  examineeId: number;
+  sessionId?: number;
+  /** Mốc đếm vi phạm cho lượt hiện tại (epoch ms), undefined = token cũ (dùng joinedAt DB). */
+  strikeSinceMs?: number;
+} | null> {
   const store = await cookies();
   const token = store.get(COOKIE_EXAMINEE)?.value;
   if (!token) return null;
@@ -100,7 +112,10 @@ export async function verifyExaminee(): Promise<{ examineeId: number; sessionId?
   if (payload?.role !== 'examinee') return null;
   const examineeId = parseInt(payload.sub, 10);
   if (Number.isNaN(examineeId)) return null;
-  return { examineeId, sessionId: payload.sessionId };
+  const raw = payload.strikeSince;
+  const strikeSinceMs =
+    typeof raw === 'number' && Number.isFinite(raw) ? raw : undefined;
+  return { examineeId, sessionId: payload.sessionId, strikeSinceMs };
 }
 
 export async function clearExamineeCookie() {

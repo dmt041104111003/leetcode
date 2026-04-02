@@ -34,3 +34,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Python gaze / proctoring service — artifact cục bộ (venv, cache, bộ dữ liệu thử)
+service/.venv/
+service/venv/
+service/**/__pycache__/
+service/**/*.py[cod]
+service/dataset/
+service/datasetQ/
+service/dataset_auto/

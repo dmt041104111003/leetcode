@@ -1,14 +1,16 @@
 'use client';
 
 import { useEffect, useCallback } from 'react';
-import type { ViolationInfo, GazeResult } from '../hooks/useProctoring';
+import type { ViolationInfo, GazeResult, ProctoringStatus, ProctoringFaceOverlay } from '../hooks/useProctoring';
 
 type ProctoringCameraProps = {
   videoRef: React.RefObject<HTMLVideoElement | null>;
   stream: MediaStream | null;
   active: boolean;
+  status?: ProctoringStatus;
   error: string | null;
   gazeResult?: GazeResult | null;
+  faceOverlay?: ProctoringFaceOverlay | null;
   enabled?: boolean;
 };
 
@@ -16,8 +18,10 @@ export function ProctoringCamera({
   videoRef,
   stream,
   active,
+  status = 'idle',
   error,
   gazeResult = null,
+  faceOverlay = null,
   enabled = true,
 }: ProctoringCameraProps) {
   const setVideoRef = useCallback(
@@ -36,6 +40,8 @@ export function ProctoringCamera({
     videoRef.current.srcObject = stream;
     videoRef.current.play().catch(() => {});
   }, [stream, videoRef]);
+
+  // Note: We intentionally do NOT render bbox/arrow on the live camera view.
 
   const showBox = enabled;
   const showVideo = active && stream;
@@ -69,12 +75,6 @@ export function ProctoringCamera({
               </svg>
             )}
           </div>
-          {gazeResult != null && gazeResult !== '' && (
-            <div className="text-xs text-gray-600 bg-white/90 rounded px-2 py-1.5 shadow">
-              <p className="text-[10px] text-gray-500 uppercase tracking-wide">Hướng mắt</p>
-              <p className="font-medium text-gray-800">{gazeResult}</p>
-            </div>
-          )}
         </div>
       )}
     </div>
@@ -86,38 +86,84 @@ type ViolationPopupProps = {
   onClose: () => void;
 };
 
-const VIOLATION_LABELS: Record<string, string> = {
-  violation: 'Vi phạm',
-  looking_away: 'Mắt nhìn lệch',
-  no_frame: 'Không có ảnh từ camera',
-  no_face: 'Không nhận diện khuôn mặt',
-  error: 'Lỗi giám sát',
-};
-
 export function ViolationPopup({ violation, onClose }: ViolationPopupProps) {
   if (!violation) return null;
-  const label = VIOLATION_LABELS[violation.type] || violation.type || 'Vi phạm';
-  const message = violation.message || '';
+  const snap = violation.snapshotDataUrl;
+  const hasSnap = typeof snap === 'string' && snap.startsWith('data:image/');
+  const msgText = violation.message ? String(violation.message) : '';
+  const enrolledId =
+    typeof violation.enrolledStudentId === 'string' && violation.enrolledStudentId.trim()
+      ? violation.enrolledStudentId.trim()
+      : '';
+  const faces = Array.isArray(violation.faces) ? violation.faces : [];
+  const f = faces[0];
+  // Chỉ MSSV định danh (chuỗi) mới được hiển thị; id numeric (track id) không hiển thị như MSSV.
+  const mssvLabel = typeof f?.id === 'string' && f.id.trim() ? f.id.trim() : enrolledId;
+  if (!hasSnap && !msgText && !mssvLabel) return null;
   return (
     <div
       className="fixed inset-0 z-[200] flex items-center justify-center p-4"
       role="dialog"
       aria-modal="true"
-      aria-labelledby="violation-title"
+      aria-label="Thông báo vi phạm giám sát"
     >
       <div className="absolute inset-0 bg-black/50" onClick={onClose} aria-hidden="true" />
-      <div className="relative w-full max-w-md rounded-xl border-2 border-red-300 bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <h2 id="violation-title" className="text-lg font-bold text-gray-900 mb-2">
-          Cảnh báo vi phạm
-        </h2>
-        <div className="mb-6">
-          <p className="text-sm font-semibold text-red-700 mb-1">{label}</p>
-          {message ? <p className="text-gray-700">{message}</p> : null}
-        </div>
+      <div
+        className="relative w-[85vmin] max-w-[92vw] max-h-[92vh] overflow-y-auto rounded-xl bg-transparent shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {hasSnap ? (
+          <div className="relative w-full aspect-[4/3]">
+            <img
+              src={snap}
+              alt="Violation snapshot"
+              className="w-full h-full object-cover rounded-lg border border-white/60 bg-black"
+            />
+          </div>
+        ) : (
+          <p className="rounded-lg bg-black/55 px-3 py-2 text-center text-sm text-white/80">
+            Không có ảnh kèm trong phản hồi.
+          </p>
+        )}
+
+        {(f || enrolledId || msgText) && (
+          <div className="mt-2 rounded-lg bg-black/60 px-3 py-2 text-white">
+            {f ? (
+              <div className="text-sm leading-snug">
+                <p className="font-medium">
+                  {mssvLabel ? `MSSV ${mssvLabel}` : 'Thí sinh'}
+                  {f.lookingAway === true ? ' — lệch' : ''}
+                </p>
+                <p className="opacity-95">
+                  {f.direction ?? '—'}
+                  {(typeof f.theta === 'number' || typeof f.phi === 'number') && (
+                    <>
+                      {' '}
+                      <span className="text-xs opacity-80">
+                        (θ={typeof f.theta === 'number' ? f.theta.toFixed(3) : '—'} rad, φ=
+                        {typeof f.phi === 'number' ? f.phi.toFixed(3) : '—'} rad)
+                      </span>
+                    </>
+                  )}
+                </p>
+              </div>
+            ) : (
+              <div className="text-sm leading-snug space-y-1">
+                {enrolledId ? (
+                  <p className="font-medium">MSSV {enrolledId}</p>
+                ) : null}
+                {msgText ? (
+                  <p className="opacity-95 whitespace-pre-line">{msgText}</p>
+                ) : null}
+              </div>
+            )}
+          </div>
+        )}
+
         <button
           type="button"
           onClick={onClose}
-          className="w-full rounded-lg bg-red-600 px-4 py-2.5 font-medium text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+          className="mt-3 w-full rounded-lg bg-white/90 px-4 py-2.5 font-medium text-gray-900 hover:bg-white focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-black/30"
         >
           Đã hiểu
         </button>

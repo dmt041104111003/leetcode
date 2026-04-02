@@ -1,13 +1,12 @@
 'use client';
 
 import { useState, useMemo, useCallback, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 import { RichTextPreview } from '@/app/admin/components/RichTextEditor';
 import type { ExamQuestionItem, ExamClientProps } from '../interfaces/exam';
 import { formatRemaining } from '../lib/time';
 import { getStarterCodeMap } from '../lib/starterCode';
 import { useCountdown } from '../hooks/useCountdown';
-import { useProctoring } from '../hooks/useProctoring';
+import { useProctoring, PROCTORING_FACE_ENROLLED_KEY } from '../hooks/useProctoring';
 import DifficultyBadge from './DifficultyBadge';
 import ConstraintsBlock from './ConstraintsBlock';
 import ExamplesBlock from './ExamplesBlock';
@@ -23,7 +22,6 @@ export default function ExamClient({
   examineeName,
   questions,
 }: ExamClientProps) {
-  const router = useRouter();
   const remainingMs = useCountdown(endAt);
   const [selectedId, setSelectedId] = useState<number | null>(questions[0]?.id ?? null);
   const [codeByProblemId, setCodeByProblemId] = useState<Record<number, string>>({});
@@ -41,8 +39,32 @@ export default function ExamClient({
   const [scoreByProblemId, setScoreByProblemId] = useState<Record<number, number | null>>({});
   const timeUp = remainingMs <= 0;
 
+  const handleLogout = useCallback(async () => {
+    try {
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.removeItem(PROCTORING_FACE_ENROLLED_KEY);
+      }
+      await fetch('/api/auth/examinee/logout', { method: 'POST', credentials: 'same-origin' });
+    } catch {
+      // vẫn thoát trang
+    }
+    if (typeof window !== 'undefined') {
+      window.location.assign('/');
+    }
+  }, []);
+
   const proctoringEnabled = !timeUp;
-  const { videoRef, stream: proctoringStream, violation, clearViolation, error: proctoringError, active: proctoringActive, gazeResult } = useProctoring(proctoringEnabled);
+  const {
+    videoRef,
+    stream: proctoringStream,
+    violation,
+    clearViolation,
+    error: proctoringError,
+    active: proctoringActive,
+    status: proctoringStatus,
+    gazeResult,
+    faceOverlay,
+  } = useProctoring(proctoringEnabled, { onStrikeout: handleLogout });
 
   useEffect(() => {
     let cancelled = false;
@@ -87,16 +109,6 @@ export default function ExamClient({
     })();
     return () => { cancelled = true; };
   }, []);
-
-  const handleLogout = useCallback(async () => {
-    try {
-      await fetch('/api/auth/examinee/logout', { method: 'POST' });
-      router.push('/');
-      router.refresh();
-    } catch {
-      router.push('/');
-    }
-  }, [router]);
 
   const selected = useMemo(() => questions.find((q) => q.id === selectedId) ?? questions[0] ?? null, [questions, selectedId]);
   const starterMap = useMemo(() => (selected ? getStarterCodeMap(selected.starterCode) : {}), [selected]);
@@ -305,7 +317,16 @@ export default function ExamClient({
   return (
     <main className="min-h-screen bg-gray-50 flex flex-col">
       {violation && <ViolationPopup violation={violation} onClose={clearViolation} />}
-      <ProctoringCamera videoRef={videoRef} stream={proctoringStream} active={proctoringActive} error={proctoringError} gazeResult={gazeResult} enabled={proctoringEnabled} />
+      <ProctoringCamera
+        videoRef={videoRef}
+        stream={proctoringStream}
+        active={proctoringActive}
+        status={proctoringStatus}
+        error={proctoringError}
+        gazeResult={gazeResult}
+        faceOverlay={faceOverlay}
+        enabled={proctoringEnabled}
+      />
       <header className="sticky top-0 z-10 flex items-center justify-between gap-4 px-4 py-3 bg-white border-b border-gray-200 shadow-sm">
         <div className="flex items-center gap-3 min-w-0">
           <h1 className="text-lg font-semibold text-gray-900 truncate">{sessionName}</h1>

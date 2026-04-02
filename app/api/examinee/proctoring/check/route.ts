@@ -1,54 +1,141 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyExaminee } from '@/lib/auth';
+import { prisma } from '@/lib/prisma';
+import { uploadProctoringViolationSnapshot } from '@/lib/proctoringSnapshotUpload';
+import type { Prisma } from '@prisma/client';
 
-const MAX_GAZE_H_DEG = 28;
-const MAX_GAZE_V_DEG = 28;
-const DIRECTION_THRESHOLD_DEG = 6;
-const RAD_TO_DEG = 180 / Math.PI;
+function envNumber(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw == null || raw.trim() === '') return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : fallback;
+}
 
-export type GazeDirectionLabel =
-  | 'Chính diện'
-  | 'Nhìn trái'
-  | 'Nhìn phải'
-  | 'Nhìn lên'
-  | 'Nhìn xuống'
-  | 'Nhìn trái lên'
-  | 'Nhìn trái xuống'
-  | 'Nhìn phải lên'
-  | 'Nhìn phải xuống';
+function getConfig() {
+  return {
+    serviceTimeoutMs: envNumber('PROCTORING_SERVICE_TIMEOUT_MS', 12_000),
+    logoutAfterViolations: envNumber('PROCTORING_LOGOUT_AFTER_VIOLATIONS', 15),
+  };
+}
+
+/** Số vi phạm trong “lượt” hiện tại + có cần đuổi không — dùng mọi response check, không chỉ khi frame này violation. */
+async function getProctoringStrikeState(params: {
+  sessionId: number;
+  examineeId: number;
+  strikeSinceMs?: number;
+}): Promise<{ violationCount: number; forceLogout: boolean }> {
+  const link = await prisma.sessionExaminee.findUnique({
+    where: {
+      sessionId_examineeId: { sessionId: params.sessionId, examineeId: params.examineeId },
+    },
+    select: { joinedAt: true },
+  });
+  const joinMs = link?.joinedAt?.getTime();
+  const jwtMs = params.strikeSinceMs;
+  const floors: number[] = [];
+  if (typeof jwtMs === 'number' && Number.isFinite(jwtMs)) floors.push(jwtMs);
+  if (typeof joinMs === 'number' && Number.isFinite(joinMs)) floors.push(joinMs);
+  const since =
+    floors.length > 0 ? new Date(Math.max(...floors)) : undefined;
+
+  const violationCount = await prisma.proctoringViolation.count({
+    where: {
+      sessionId: params.sessionId,
+      examineeId: params.examineeId,
+      ...(since ? { createdAt: { gte: since } } : {}),
+    },
+  });
+  const { logoutAfterViolations } = getConfig();
+  return {
+    violationCount,
+    forceLogout: violationCount >= logoutAfterViolations,
+  };
+}
+
+async function recordProctoringViolation(params: {
+  sessionId: number;
+  examineeId: number;
+  violationType: string;
+  message: string;
+  facesCount?: number;
+  meta?: Prisma.InputJsonValue;
+  snapshotUrl?: string | null;
+  /** Từ JWT — mốc “lượt” hiện tại; kết hợp joinedAt để token cũ vẫn đúng. */
+  strikeSinceMs?: number;
+}) {
+  const sessionRow = await prisma.session.findUnique({
+    where: { id: params.sessionId },
+    select: { examId: true },
+  });
+  await prisma.proctoringViolation.create({
+    data: {
+      sessionId: params.sessionId,
+      examId: sessionRow?.examId ?? null,
+      examineeId: params.examineeId,
+      violationType: params.violationType,
+      message: params.message,
+      facesCount: params.facesCount ?? null,
+      snapshotUrl: params.snapshotUrl ?? null,
+      meta: params.meta ?? undefined,
+    },
+  });
+
+  return getProctoringStrikeState({
+    sessionId: params.sessionId,
+    examineeId: params.examineeId,
+    strikeSinceMs: params.strikeSinceMs,
+  });
+}
 
 export type ProctoringCheckResponse = {
   violation: boolean;
+  type?: string;
   message: string;
-  gazeDirection: GazeDirectionLabel;
+  facesCount?: number;
+  faces?: Array<{
+    id?: number | string;
+    theta: number;
+    phi: number;
+    bbox?: number[];
+    dx_px?: number;
+    dy_px?: number;
+    direction?: string;
+    looking_away?: boolean;
+  }>;
+  annotatedImageBase64?: string;
+  enrolledStudentId?: string;
+  violationCount?: number;
+  forceLogout?: boolean;
+  face?: {
+    theta: number;
+    phi: number;
+    bbox?: number[];
+    dx_px?: number;
+    dy_px?: number;
+  };
 };
 
-type GazeApiFace = { theta: number; phi: number };
+type GazeApiFace = {
+  id?: number | string;
+  theta: number;
+  phi: number;
+  bbox?: number[];
+  dx?: number;
+  dy?: number;
+  dx_px?: number;
+  dy_px?: number;
+  direction?: string;
+  looking_away?: boolean;
+};
 type GazeEstimateResponse = { faces?: GazeApiFace[] };
-
-function gazeRadToDeg(thetaRad: number, phiRad: number): { horizontalDeg: number; verticalDeg: number } {
-  const horizontalDeg = phiRad * RAD_TO_DEG;
-  const verticalDeg = thetaRad * RAD_TO_DEG;
-  return { horizontalDeg, verticalDeg };
-}
-
-function getGazeDirectionLabel(horizontalDeg: number, verticalDeg: number): GazeDirectionLabel {
-  const t = DIRECTION_THRESHOLD_DEG;
-  const left = horizontalDeg < -t;
-  const right = horizontalDeg > t;
-  const up = verticalDeg > t;
-  const down = verticalDeg < -t;
-  if (!left && !right && !up && !down) return 'Chính diện';
-  if (left && up) return 'Nhìn trái lên';
-  if (left && down) return 'Nhìn trái xuống';
-  if (left) return 'Nhìn trái';
-  if (right && up) return 'Nhìn phải lên';
-  if (right && down) return 'Nhìn phải xuống';
-  if (right) return 'Nhìn phải';
-  if (up) return 'Nhìn lên';
-  if (down) return 'Nhìn xuống';
-  return 'Chính diện';
-}
+type GazeEstimateResponseWithImage = GazeEstimateResponse & {
+  annotated_image_base64?: string | null;
+  faces_count?: number;
+  violation?: boolean;
+  violation_type?: string;
+  message?: string;
+  enrolled_student_id?: string | null;
+};
 
 export async function POST(
   req: NextRequest
@@ -66,11 +153,23 @@ export async function POST(
     const imageBase64 = typeof body?.imageBase64 === 'string' ? body.imageBase64 : '';
 
     if (!imageBase64) {
+      const strike = await recordProctoringViolation({
+        sessionId: auth.sessionId,
+        examineeId: auth.examineeId,
+        violationType: 'no_frame',
+        message: 'Không có ảnh từ camera.',
+        facesCount: 0,
+        strikeSinceMs: auth.strikeSinceMs,
+      });
       return NextResponse.json({
         violation: true,
         type: 'no_frame',
         message: 'Không có ảnh từ camera.',
-        gazeDirection: 'Chính diện',
+        facesCount: 0,
+        faces: [],
+        face: undefined,
+        violationCount: strike.violationCount,
+        forceLogout: strike.forceLogout,
       });
     }
 
@@ -82,11 +181,33 @@ export async function POST(
       );
     }
 
-    const res = await fetch(`${serviceUrl.replace(/\/$/, '')}/gaze/estimate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image_base64: imageBase64 }),
+    const examineeRow = await prisma.examinee.findUnique({
+      where: { id: auth.examineeId },
+      select: { mssv: true },
     });
+    const studentId = examineeRow?.mssv?.trim() ?? '';
+
+    const endpoint = `${serviceUrl.replace(/\/$/, '')}/gaze/estimate`;
+    let res: Response;
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), getConfig().serviceTimeoutMs);
+      res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image_base64: imageBase64,
+          ...(studentId ? { student_id: studentId } : {}),
+        }),
+        signal: controller.signal,
+      }).finally(() => clearTimeout(timer));
+    } catch (e) {
+      const msg =
+        e instanceof Error && (e.name === 'AbortError' || /aborted/i.test(e.message))
+          ? 'Timeout gọi dịch vụ giám sát. Thử lại.'
+          : 'Không kết nối được dịch vụ giám sát. Hãy chạy service và kiểm tra PROCTORING_SERVICE_URL.';
+      return NextResponse.json({ error: msg }, { status: 503 });
+    }
 
     if (!res.ok) {
       const err = (await res.json().catch(() => ({}))) as { detail?: string };
@@ -96,42 +217,84 @@ export async function POST(
       );
     }
 
-    const data = (await res.json().catch(() => ({}))) as GazeEstimateResponse;
-    const faces = Array.isArray(data.faces) ? data.faces : [];
+    const data = (await res.json().catch(() => ({}))) as GazeEstimateResponseWithImage;
+    const facesRaw = Array.isArray(data.faces) ? data.faces : [];
+    /** Chỉ trim chuỗi; không ép MSSV từ JWT khi service chưa khớp định danh (id track số giữ nguyên). */
+    const faces: GazeApiFace[] = facesRaw.map((f) =>
+      typeof f.id === 'string' && f.id.trim() !== '' ? { ...f, id: f.id.trim() } : { ...f }
+    );
     const face = faces[0];
 
-    if (!face || typeof face.theta !== 'number' || typeof face.phi !== 'number') {
-      return NextResponse.json({
-        violation: true,
-        type: 'no_face',
-        message: 'Không nhận diện được khuôn mặt. Nhìn thẳng vào camera.',
-        gazeDirection: 'Chính diện',
-      });
-    }
+    const annotatedImageBase64 =
+      typeof data.annotated_image_base64 === 'string' ? data.annotated_image_base64 : undefined;
+    const facesCount = typeof data.faces_count === 'number' ? data.faces_count : faces.length;
+    const serviceMessage = typeof data.message === 'string' ? data.message : 'OK';
+    const serviceType = typeof data.violation_type === 'string' ? data.violation_type : undefined;
+    const serviceViolation = Boolean(data.violation);
+    const enrolledFromService =
+      typeof data.enrolled_student_id === 'string' ? data.enrolled_student_id.trim() : '';
+    const enrolledStudentId = enrolledFromService || undefined;
 
-    const { horizontalDeg, verticalDeg } = gazeRadToDeg(face.theta, face.phi);
-    const gazeDirection = getGazeDirectionLabel(horizontalDeg, verticalDeg);
-    const lookingAway =
-      Math.abs(horizontalDeg) > MAX_GAZE_H_DEG || Math.abs(verticalDeg) > MAX_GAZE_V_DEG;
+    let violationCount: number | undefined;
+    let forceLogout = false;
+    if (serviceViolation) {
+      const facesMeta = faces.map((f) => ({
+        id: f.id,
+        direction: f.direction,
+        looking_away: f.looking_away,
+        ...(typeof f.theta === 'number' ? { theta: f.theta } : {}),
+        ...(typeof f.phi === 'number' ? { phi: f.phi } : {}),
+      }));
 
-    if (lookingAway) {
-      return NextResponse.json({
-        violation: true,
-        type: 'looking_away',
-        message: `${gazeDirection}. Nhìn thẳng vào camera.`,
-        gazeDirection,
+      let snapshotUrl: string | null = null;
+      const b64ForUpload = annotatedImageBase64?.trim() || imageBase64.trim();
+      if (b64ForUpload) {
+        snapshotUrl = await uploadProctoringViolationSnapshot(b64ForUpload, {
+          sessionId: auth.sessionId,
+          examineeId: auth.examineeId,
+          violationIdHint: `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+        });
+      }
+
+      const strike = await recordProctoringViolation({
+        sessionId: auth.sessionId,
+        examineeId: auth.examineeId,
+        violationType: serviceType ?? 'unknown',
+        message: serviceMessage,
+        facesCount,
+        snapshotUrl,
+        meta: {
+          enrolled_student_id: enrolledStudentId ?? null,
+          faces: facesMeta,
+        },
+        strikeSinceMs: auth.strikeSinceMs,
       });
+      violationCount = strike.violationCount;
+      forceLogout = strike.forceLogout;
+    } else {
+      // Frame OK nhưng đã vượt ngưỡng lượt này — vẫn phải trả forceLogout để client đăng xuất ngay.
+      const strike = await getProctoringStrikeState({
+        sessionId: auth.sessionId,
+        examineeId: auth.examineeId,
+        strikeSinceMs: auth.strikeSinceMs,
+      });
+      violationCount = strike.violationCount;
+      forceLogout = strike.forceLogout;
     }
 
     return NextResponse.json({
-      violation: false,
-      message: gazeDirection,
-      gazeDirection,
+      violation: serviceViolation,
+      type: serviceType,
+      message: serviceMessage,
+      facesCount,
+      faces,
+      face: face && typeof face.theta === 'number' && typeof face.phi === 'number' ? face : undefined,
+      annotatedImageBase64,
+      enrolledStudentId,
+      violationCount,
+      forceLogout,
     });
   } catch {
-    return NextResponse.json(
-      { error: 'Lỗi xử lý kiểm tra giám sát' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Lỗi xử lý kiểm tra giám sát' }, { status: 500 });
   }
 }

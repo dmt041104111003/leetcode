@@ -19,6 +19,7 @@ model Session {
   submissions  Submission[]
   sessionClasses SessionClass[]
   exam         Exam?            @relation(fields: [examId], references: [id], onDelete: Restrict)
+  proctoringViolations ProctoringViolation[]
 
   @@map("sessions")
 }
@@ -66,6 +67,7 @@ model Examinee {
   sessions    SessionExaminee[]
   submissions Submission[]
   classes     ClassExaminee[]
+  proctoringViolations ProctoringViolation[]
 
   @@map("examinees")
 }
@@ -74,12 +76,36 @@ model SessionExaminee {
   id          Int      @id @default(autoincrement())
   sessionId   Int      @map("session_id")
   examineeId  Int      @map("examinee_id")
+  /// Thời điểm thí sinh đăng nhập vào ca thi (nhập đúng mã ca). null = chưa vào thi.
+  joinedAt    DateTime? @map("joined_at")
   createdAt   DateTime @default(now()) @map("created_at")
   session     Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   examinee    Examinee @relation(fields: [examineeId], references: [id], onDelete: Cascade)
 
   @@unique([sessionId, examineeId])
   @@map("session_examinees")
+}
+
+/// Mỗi lần API giám sát báo vi phạm, ghi một dòng (theo ca thi + thí sinh + đề thi).
+model ProctoringViolation {
+  id             Int      @id @default(autoincrement())
+  sessionId      Int      @map("session_id")
+  examId         Int?     @map("exam_id")
+  examineeId     Int      @map("examinee_id")
+  violationType  String  @map("violation_type")
+  message        String?  @db.Text
+  facesCount     Int?     @map("faces_count")
+  /// Ảnh vi phạm (bbox + mũi tên) trên Cloudinary — mỗi lần vi phạm có thể có ảnh
+  snapshotUrl    String?  @map("snapshot_url") @db.Text
+  meta           Json?    @map("meta")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  examinee  Examinee @relation(fields: [examineeId], references: [id], onDelete: Cascade)
+  exam      Exam?    @relation(fields: [examId], references: [id], onDelete: SetNull)
+
+  @@index([sessionId, examineeId])
+  @@map("proctoring_violations")
 }
 
 model Problem {
@@ -110,6 +136,7 @@ model Exam {
   createdAt   DateTime      @default(now()) @map("created_at")
   questions   ExamQuestion[]
   sessions    Session[]
+  proctoringViolations ProctoringViolation[]
 
   @@map("exams")
 }

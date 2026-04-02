@@ -43,7 +43,11 @@ export default function SessionCodePanel(p: Props) {
             <p className="text-sm text-gray-500 mt-1">Bắt đầu: {formatDateTime(session.startAt)} — Kết thúc: {formatDateTime(session.endAt)}</p>
             <div className="mt-4">
               {status === 'upcoming' && <p className="text-amber-700 text-sm font-medium py-2 text-center rounded-lg bg-amber-50">Vui lòng chờ kỳ thi bắt đầu.</p>}
-              {status === 'active' && <button type="button" onClick={onStart} disabled={loading} className="w-full py-2 px-4 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 disabled:opacity-50">{loading ? 'Đang vào ca thi...' : 'Bắt đầu'}</button>}
+              {status === 'active' && (
+                <button type="button" onClick={onStart} disabled={loading} className="w-full py-2 px-4 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 disabled:opacity-50">
+                  {loading ? 'Đang mở...' : 'Bắt đầu kỳ thi'}
+                </button>
+              )}
               {status === 'ended' && <p className="text-red-600 font-medium py-2 text-center rounded-lg bg-red-50">Kỳ thi đã kết thúc.</p>}
             </div>
           </div>

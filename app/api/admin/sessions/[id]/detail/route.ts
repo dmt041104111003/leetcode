@@ -28,6 +28,7 @@ export async function GET(
       const count = await prisma.sessionExaminee.count({
         where: {
           sessionId: id,
+          joinedAt: { not: null },
           examinee: { classes: { some: { classId } } },
         },
       });
